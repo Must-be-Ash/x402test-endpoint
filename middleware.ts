@@ -111,7 +111,9 @@ const httpServer = new x402HTTPResourceServer(resourceServer, routes)
   .onProtectedRequest(createKYCGateHook(KYC_VERIFY_ENDPOINT))
   .onProtectedRequest(createSIWxRequestHook({ storage }));
 
-export const proxy = paymentProxyFromHTTPServer(httpServer);
+export const middleware = paymentProxyFromHTTPServer(httpServer);
+
+export const runtime = "nodejs";
 
 export const config = {
   matcher: ["/api/random"],
