@@ -102,14 +102,65 @@ async function test2() {
 }
 
 // ─── Test 3: SIWX without KYC is blocked ───
+// NOTE: If the test wallet is already KYC'd, this test checks that
+// SIWX-only (no payment) still requires payment (402), not free access.
 async function test3() {
-  console.log("═══ Test 3: SIWX without KYC is blocked ═══");
+  const kycCheck = await fetch(`https://kyc-panda.vercel.app/api/verify/${account.address}`);
+  const kycData = await kycCheck.json();
+  const isKycd = kycData.verified === true;
+
+  if (isKycd) {
+    console.log("═══ Test 3: SIWX-only (KYC'd wallet) still requires payment ═══");
+  } else {
+    console.log("═══ Test 3: SIWX without KYC is blocked ═══");
+  }
 
   const siwxHeaderValue = await getSIWxHeader();
   if (!siwxHeaderValue) {
     console.log("FAIL: Could not get SIWX challenge\n");
     return false;
   }
+
+  const res = await fetch(ENDPOINT, {
+    headers: { "SIGN-IN-WITH-X": siwxHeaderValue },
+  });
+  console.log(`Status: ${res.status}`);
+  const body = await res.text();
+  console.log(`Body: ${body}`);
+
+  if (!isKycd && res.status === 403) {
+    console.log("PASS: Non-KYC'd wallet blocked\n");
+    return true;
+  }
+  if (isKycd && res.status === 402) {
+    console.log("PASS: KYC'd wallet still needs to pay (SIWX alone is not enough)\n");
+    return true;
+  }
+  console.log(`FAIL: Expected ${isKycd ? 402 : 403}, got ${res.status}\n`);
+  return false;
+}
+
+// ─── Test 3b: Non-KYC'd wallet is blocked (fresh random wallet) ───
+async function test3b() {
+  console.log("═══ Test 3b: Non-KYC'd wallet SIWX is blocked ═══");
+
+  // Generate a fresh random wallet — guaranteed not KYC'd
+  const { generatePrivateKey } = await import("viem/accounts");
+  const freshKey = generatePrivateKey();
+  const freshAccount = privateKeyToAccount(freshKey);
+  console.log(`Using fresh wallet: ${freshAccount.address}`);
+
+  // Get SIWX challenge and sign with the fresh wallet
+  const res402 = await fetch(ENDPOINT);
+  const header = res402.headers.get("payment-required");
+  if (!header) { console.log("FAIL: No 402\n"); return false; }
+  const decoded = decode402(header);
+  const siwxExt = decoded?.extensions?.["sign-in-with-x"];
+  if (!siwxExt?.info) { console.log("FAIL: No SIWX extension\n"); return false; }
+  const chain = siwxExt.supportedChains[0];
+  const completeInfo = { ...siwxExt.info, chainId: chain.chainId, type: chain.type };
+  const payload = await createSIWxPayload(completeInfo, freshAccount);
+  const siwxHeaderValue = encodeSIWxHeader(payload);
 
   const res = await fetch(ENDPOINT, {
     headers: { "SIGN-IN-WITH-X": siwxHeaderValue },
@@ -147,9 +198,16 @@ async function test4() {
     return false;
   }
 
-  // Wrap fetch to always include SIWX header
+  // Wrap fetch to always include SIWX header.
+  // wrapFetchWithPayment retries with a Request object (not init.headers),
+  // so we need to merge headers from both the Request and init.
   const fetchWithSIWx = (input: RequestInfo | URL, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
+    const headers = new Headers(
+      input instanceof Request ? input.headers : init?.headers,
+    );
+    if (init?.headers) {
+      new Headers(init.headers).forEach((v, k) => headers.set(k, v));
+    }
     headers.set("SIGN-IN-WITH-X", siwxHeaderValue);
     return fetch(input, { ...init, headers });
   };
@@ -219,7 +277,8 @@ async function main() {
 
   results["Test 1: 402 + KYC extensions"] = await test1();
   results["Test 2: Payment blocked without SIWX"] = await test2();
-  results["Test 3: SIWX blocked without KYC"] = await test3();
+  results["Test 3: SIWX-only requires payment (or blocked without KYC)"] = await test3();
+  results["Test 3b: Non-KYC'd wallet blocked"] = await test3b();
   results["Test 4: KYC'd wallet can pay"] = await test4();
   results["Test 5: Must pay every time"] = await test5();
 
