@@ -1,5 +1,7 @@
 # x402 KYC-Gated Endpoint Example
 
+> **Not maintained.** x402 and the services this uses may have changed since it was built; check the latest x402 docs before relying on it.
+
 A reference implementation showing how to add KYC verification to an x402-protected API endpoint. The endpoint returns a random number (1-9) behind a $0.02 USDC paywall — but only KYC-verified wallets are allowed to pay.
 
 **Live endpoint:** `https://x402test-endpoint.vercel.app/api/random`
